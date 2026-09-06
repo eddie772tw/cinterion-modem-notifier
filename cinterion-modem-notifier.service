@@ -1,0 +1,17 @@
+[Unit]
+Description=Cinterion ModemManager Discord notifier
+After=ModemManager.service
+Wants=ModemManager.service
+
+[Service]
+Type=simple
+EnvironmentFile=-%h/.config/cinterion-modem-notifier/env
+ExecStart=/usr/bin/python3 %h/cinterion-modem-notifier/modem_notifier.py
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=yes
+PrivateTmp=yes
+UMask=0077
+
+[Install]
+WantedBy=default.target

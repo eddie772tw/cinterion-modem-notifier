@@ -1,0 +1,30 @@
+# Local configuration and credentials
+env
+.env
+.env.*
+*.env
+secrets/
+*.pem
+*.key
+
+# Runtime state and logs
+state.json
+*.state.json
+*.log
+
+# Python generated files and local tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Editor and OS files
+.idea/
+.vscode/
+*.swp
+.DS_Store
