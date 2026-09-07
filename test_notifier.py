@@ -20,9 +20,28 @@ from modem_notifier import (
     masked_number,
     sms_identity,
 )
+from modem_events import SIGNAL_HEADER
+from modem_history import EventHistory
 
 
 class NotifierTests(unittest.TestCase):
+    def test_event_history_upserts_observations_and_returns_recent_events(self):
+        with tempfile.TemporaryDirectory() as directory:
+            history = EventHistory(Path(directory) / "events.db")
+            event = Event("status", "Status", {"state": "registered"})
+            history.observe(event)
+            history.observe(event)
+            rows = history.recent()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["observations"], 2)
+            self.assertEqual(rows[0]["fields"]["state"], "registered")
+
+    def test_modem_signal_header_extracts_interface_and_member(self):
+        line = "object /org/freedesktop/ModemManager1/Modem/0: signal interface=org.freedesktop.DBus.Properties; member=PropertiesChanged"
+        match = SIGNAL_HEADER.search(line)
+        self.assertIsNotNone(match)
+        self.assertEqual(match["object_path"], "/org/freedesktop/ModemManager1/Modem/0")
+
     def test_embed_colors_classify_modem_and_sms_events(self):
         connected = Event("status", "status", {
             "state": "registered", "network registration": "home",
@@ -169,6 +188,7 @@ class NotifierTests(unittest.TestCase):
             store = Store(path)
             self.assertEqual(store.data["fingerprints"], [])
             self.assertEqual(store.data["seen_sms"], [])
+            self.assertEqual(store.data["sms_paths"], {})
             self.assertEqual(store.data["calls"], {})
 
     def test_rejects_unknown_call_policy(self):

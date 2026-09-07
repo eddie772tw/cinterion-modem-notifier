@@ -2,7 +2,25 @@
 
 A persistent ModemManager monitor that posts deduplicated modem, SIM, LTE,
 data-bearer, incoming-SMS, call-state, and possible-missed-call updates to a
-Discord webhook. It uses only the Python standard library and `mmcli`.
+Discord webhook. It uses only the Python standard library, `mmcli`, and the
+system `gdbus` signal monitor over all ModemManager objects.
+
+The notifier performs one initial snapshot, then uses ModemManager D-Bus
+signals as its primary trigger. It retains a full polling path only as a
+fallback when the signal monitor exits, plus a cheap periodic reconciliation of
+SMS and call object lists to protect against missed or buffered D-Bus signal
+lines. A signal still causes the existing deduplicated snapshot code to run, so
+presentation and privacy behavior remain centralized.
+
+`RECONCILIATION_INTERVAL_SECONDS` controls that safety net and defaults to 5
+seconds; `POLL_INTERVAL_SECONDS` remains the slower full-snapshot fallback and
+defaults to 20 seconds. The SMS path index is pruned against the current modem
+object list so it does not grow without bound after old messages are deleted.
+
+Observed events are also upserted into a private SQLite history under
+`$XDG_STATE_HOME/cinterion-modem-notifier/events.db` (normally
+`~/.local/state/...`). The history is local-only and protected with mode 600;
+SMS fields remain sensitive even though the database is not externally shared.
 
 ## Safety and privacy
 
@@ -84,9 +102,9 @@ systemctl --user status cinterion-modem-notifier.service
 journalctl --user -u cinterion-modem-notifier.service -f
 ```
 
-The service expects ModemManager and `mmcli` to be installed. It uses only the
-Python standard library and does not require network access unless a Discord
-webhook is configured.
+The service expects ModemManager, `mmcli`, and `gdbus` to be installed. It uses
+only the Python standard library and does not require network access unless a
+Discord webhook is configured.
 
 ## License
 

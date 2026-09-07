@@ -23,6 +23,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from modem_events import GdbusSignalSource
+from modem_history import EventHistory
+
 
 LOG = logging.getLogger("cinterion_modem_notifier")
 # mmcli prints D-Bus object paths such as ``.../SMS/30``. Keep this narrow so
@@ -180,7 +183,7 @@ class Mmcli:
 class Store:
     def __init__(self, path: Path) -> None:
         self.path = path
-        self.data: dict[str, Any] = {"fingerprints": [], "seen_sms": [], "calls": {}}
+        self.data: dict[str, Any] = {"fingerprints": [], "seen_sms": [], "sms_paths": {}, "calls": {}}
         try:
             loaded = json.loads(path.read_text())
             if isinstance(loaded, dict):
@@ -197,6 +200,8 @@ class Store:
                 self.data[key] = []
         if not isinstance(self.data.get("calls"), dict):
             self.data["calls"] = {}
+        if not isinstance(self.data.get("sms_paths"), dict):
+            self.data["sms_paths"] = {}
 
     def seen(self, event: Event) -> bool:
         return event.fingerprint() in self.data["fingerprints"]
@@ -261,8 +266,8 @@ class Discord:
 
 
 class Monitor:
-    def __init__(self, mmcli: Mmcli, store: Store, discord: Discord, call_policy: str) -> None:
-        self.mmcli, self.store, self.discord = mmcli, store, discord
+    def __init__(self, mmcli: Mmcli, store: Store, discord: Discord, call_policy: str, history: EventHistory | None = None) -> None:
+        self.mmcli, self.store, self.discord, self.history = mmcli, store, discord, history
         if call_policy not in {"hangup-incoming", "observe"}:
             raise ValueError("CALL_POLICY must be 'hangup-incoming' or 'observe'")
         self.call_policy = call_policy
@@ -273,8 +278,20 @@ class Monitor:
             store.data["delivery_target"] = discord.target_id
 
     def poll(self) -> None:
-        events = self._status_events() + self._sms_events() + self._call_events()
+        self._deliver_events(self._status_events() + self._sms_events() + self._call_events())
+
+    def poll_status(self) -> None:
+        """Process a modem status signal without scanning SMS objects."""
+        self._deliver_events(self._status_events())
+
+    def poll_reconciliation(self) -> None:
+        """Reconcile object-list events without polling modem status."""
+        self._deliver_events(self._sms_events(only_new_paths=True) + self._call_events())
+
+    def _deliver_events(self, events: list[Event]) -> None:
         for event in events:
+            if self.history is not None:
+                self.history.observe(event)
             if self.store.seen(event):
                 continue
             if self.discord.deliver(event):
@@ -324,11 +341,19 @@ class Monitor:
 
         return [Event("status", "Modem status update", fields)]
 
-    def _sms_events(self) -> list[Event]:
+    def _sms_events(self, only_new_paths: bool = False) -> list[Event]:
         events: list[Event] = []
         seen: set[str] = set(self.store.data["seen_sms"])
+        sms_paths: dict[str, str] = self.store.data["sms_paths"]
         migrated = False
-        for path in self.mmcli.paths("--messaging-list-sms"):
+        paths = self.mmcli.paths("--messaging-list-sms")
+        current_paths = set(paths)
+        for path in list(sms_paths):
+            if path not in current_paths:
+                del sms_paths[path]
+        for path in paths:
+            if only_new_paths and path in sms_paths and sms_paths[path] in seen:
+                continue
             sms = self.mmcli.json("-s", path)
             if not sms:
                 continue
@@ -341,6 +366,7 @@ class Monitor:
             if details.get("state") != "received":
                 continue
             identity = sms_identity(details)
+            sms_paths[path] = identity
             if identity in seen:
                 continue
             # Migrate paths written by versions before stable SMS identities.
@@ -402,15 +428,70 @@ def main() -> int:
         Store(state_home / "cinterion-modem-notifier/state.json"),
         Discord(setting("DISCORD_WEBHOOK_URL", "")),
         setting("CALL_POLICY", "hangup-incoming"),
+        EventHistory(state_home / "cinterion-modem-notifier/events.db"),
     )
     try:
         interval = max(5, int(setting("POLL_INTERVAL_SECONDS", "20")))
     except ValueError:
         LOG.warning("invalid POLL_INTERVAL_SECONDS; using 20")
         interval = 20
-    while True:
-        monitor.poll()
-        time.sleep(interval)
+    try:
+        reconciliation_interval = max(1, int(setting("RECONCILIATION_INTERVAL_SECONDS", "5")))
+    except ValueError:
+        LOG.warning("invalid RECONCILIATION_INTERVAL_SECONDS; using 5")
+        reconciliation_interval = 5
+    modem_path = f"/org/freedesktop/ModemManager1/Modem/{monitor.mmcli.modem_id}"
+    # Monitor all ModemManager objects so SMS/Call object signals are not
+    # lost when they are emitted below the modem object path.
+    watcher = GdbusSignalSource()
+    try:
+        watcher.start()
+    except (OSError, RuntimeError) as exc:
+        LOG.warning("event monitor unavailable; falling back to polling: %s", exc)
+        watcher = None
+
+    # Start listening before the potentially expensive initial SMS scan. Any
+    # signals emitted during the scan remain buffered and are reconciled after
+    # the initial snapshot, eliminating the startup blind window.
+    monitor.poll()
+
+    # ModemManager emits state/property/SMS/call signals on the modem object.
+    # A signal triggers the existing deduplicated snapshot logic; the fallback
+    # poll is deliberately slow and only protects against a dead signal source.
+    last_fallback_poll = time.monotonic()
+    last_reconciliation = last_fallback_poll
+    try:
+        while True:
+            if watcher is not None:
+                signal = watcher.next_signal(timeout=1.0)
+                if signal is not None:
+                    LOG.debug(
+                        "ModemManager signal: path=%s interface=%s member=%s",
+                        signal.object_path,
+                        signal.interface,
+                        signal.member,
+                    )
+                    if signal.object_path == modem_path:
+                        monitor.poll_status()
+                    elif signal.object_path.startswith("/org/freedesktop/ModemManager1/SMS/") or signal.object_path.startswith("/org/freedesktop/ModemManager1/Call/") or signal.member in {"Added", "Deleted"} or any(
+                        name in signal.interface for name in ("Messaging", "Voice")
+                    ):
+                        monitor.poll_reconciliation()
+                elif not watcher.alive:
+                    LOG.warning("event monitor exited; falling back to polling")
+                    watcher.stop()
+                    watcher = None
+            if watcher is None and time.monotonic() - last_fallback_poll >= interval:
+                monitor.poll()
+                last_fallback_poll = time.monotonic()
+            elif watcher is not None and time.monotonic() - last_reconciliation >= reconciliation_interval:
+                # Signals remain primary, but SMS/call object lists are cheap
+                # to reconcile and protect against missed/buffered D-Bus lines.
+                monitor.poll_reconciliation()
+                last_reconciliation = time.monotonic()
+    finally:
+        if watcher is not None:
+            watcher.stop()
 
 
 if __name__ == "__main__":
