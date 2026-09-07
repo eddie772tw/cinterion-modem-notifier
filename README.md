@@ -23,11 +23,19 @@ database. Query them through the shared adapter:
 ```bash
 python3 scripts/query_modem.py health
 python3 scripts/query_modem.py metrics --limit 50
+python3 scripts/query_modem.py inbox --limit 50 --redact-sms
+python3 scripts/query_modem.py sms-cleanup --limit 50 --redact-sms
 python3 scripts/benchmark_sms.py --samples 5
 ```
 
 The benchmark is read-only. It measures path-list enumeration, incremental
 reconciliation, and (unless `--skip-full` is used) one full SMS scan.
+
+The local inbox is currently **archive-only**: complete received SMS payloads
+are copied into the mode-600 SQLite database before notification bookkeeping,
+but modem SMS are never deleted. `sms-cleanup` is a dry-run report only and
+always returns `delete_performed: false` until a separately authorized cleanup
+policy is implemented.
 
 Observed events are also upserted into a private SQLite history under
 `$XDG_STATE_HOME/cinterion-modem-notifier/events.db` (normally

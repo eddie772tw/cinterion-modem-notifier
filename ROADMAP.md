@@ -9,6 +9,7 @@ This roadmap prioritizes long-running reliability and bounded SMS notification l
 - ModemManager signal watcher is retained, but live SMS signals have not been observed through the current `gdbus` monitor path.
 - A 5-second SMS/call reconciliation pass is the reliable notification path.
 - Known SMS paths are indexed so reconciliation does not re-read old SMS bodies.
+- Complete received SMS payloads are now archived locally in SQLite; modem cleanup remains disabled and dry-run only.
 - Recent measured SMS notification latency: about 4-7 seconds.
 - Full scan cost at 36 stored SMS: about 7.35 seconds; incremental reconciliation: about 0.17-0.19 seconds.
 
@@ -58,6 +59,7 @@ This roadmap prioritizes long-running reliability and bounded SMS notification l
 - Add a periodic full consistency scan at a much lower frequency than reconciliation.
 - Measure path-list latency at representative storage sizes before changing intervals.
 - Add tests for path deletion, path reuse, storage migration, duplicate multipart messages, and malformed SMS objects.
+- Add an explicit `archive-then-delete` policy only after archive integrity and outbox retry behavior are proven.
 - Do not use PostgreSQL to optimize the ModemManager list call; the bottleneck is upstream of the database.
 
 ### Acceptance

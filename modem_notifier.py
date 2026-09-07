@@ -26,6 +26,7 @@ from typing import Any
 
 from modem_events import GdbusSignalSource
 from modem_history import EventHistory
+from sms_inbox import SmsInbox
 
 
 LOG = logging.getLogger("cinterion_modem_notifier")
@@ -274,8 +275,8 @@ class Discord:
 
 
 class Monitor:
-    def __init__(self, mmcli: Mmcli, store: Store, discord: Discord, call_policy: str, history: EventHistory | None = None) -> None:
-        self.mmcli, self.store, self.discord, self.history = mmcli, store, discord, history
+    def __init__(self, mmcli: Mmcli, store: Store, discord: Discord, call_policy: str, history: EventHistory | None = None, inbox: SmsInbox | None = None) -> None:
+        self.mmcli, self.store, self.discord, self.history, self.inbox = mmcli, store, discord, history, inbox
         if call_policy not in {"hangup-incoming", "observe"}:
             raise ValueError("CALL_POLICY must be 'hangup-incoming' or 'observe'")
         self.call_policy = call_policy
@@ -325,6 +326,8 @@ class Monitor:
                 self.store.record(event)
                 if event.kind.startswith("sms:"):
                     self.store.data["seen_sms"] = (self.store.data["seen_sms"] + [event.kind[4:]])[-500:]
+                    if self.inbox is not None:
+                        self.inbox.mark_notified(event.kind[4:])
                     if self.history is not None:
                         lag = sms_age_seconds(event.fields.get("timestamp", ""))
                         if lag is not None:
@@ -398,16 +401,6 @@ class Monitor:
                 continue
             identity = sms_identity(details)
             sms_paths[path] = identity
-            if identity in seen:
-                continue
-            # Migrate paths written by versions before stable SMS identities.
-            # The content is read before accepting the legacy path, so future
-            # path reuse can be detected by its different identity.
-            if path in seen:
-                seen.remove(path)
-                seen.add(identity)
-                migrated = True
-                continue
             text = details.get("text")
             data = details.get("data")
             if text in (None, "", "--") and data not in (None, "", "--"):
@@ -418,6 +411,20 @@ class Monitor:
                 "storage": str(details.get("storage", "--")),
                 "text": str(text) if text not in (None, "") else "--",
             }
+            if data not in (None, "", "--"):
+                fields["data"] = str(data)
+            if self.inbox is not None:
+                self.inbox.archive(identity, path, fields, already_notified=identity in seen)
+            if identity in seen:
+                continue
+            # Migrate paths written by versions before stable SMS identities.
+            # The content is read before accepting the legacy path, so future
+            # path reuse can be detected by its different identity.
+            if path in seen:
+                seen.remove(path)
+                seen.add(identity)
+                migrated = True
+                continue
             events.append(Event(f"sms:{identity}", "Incoming SMS", fields))
         if migrated:
             self.store.data["seen_sms"] = list(seen)[-500:]
@@ -460,6 +467,7 @@ def main() -> int:
         Discord(setting("DISCORD_WEBHOOK_URL", "")),
         setting("CALL_POLICY", "hangup-incoming"),
         EventHistory(state_home / "cinterion-modem-notifier/events.db"),
+        SmsInbox(state_home / "cinterion-modem-notifier/events.db"),
     )
     try:
         interval = max(5, int(setting("POLL_INTERVAL_SECONDS", "20")))

@@ -22,6 +22,7 @@ from modem_notifier import (
 )
 from modem_events import SIGNAL_HEADER
 from modem_history import EventHistory
+from sms_inbox import SmsInbox
 
 
 class NotifierTests(unittest.TestCase):
@@ -44,6 +45,18 @@ class NotifierTests(unittest.TestCase):
             self.assertEqual(len(metrics), 1)
             self.assertEqual(metrics[0]["unit"], "seconds")
             self.assertEqual(metrics[0]["dimensions"]["sms_count"], 3)
+
+    def test_sms_inbox_archives_and_lists_cleanup_candidates_without_deleting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            inbox = SmsInbox(Path(directory) / "events.db")
+            inbox.archive("identity", "/SMS/1", {
+                "from": "0900", "timestamp": "now", "storage": "me", "text": "hello",
+            })
+            self.assertEqual(inbox.cleanup_candidates({"/SMS/1"}), [])
+            inbox.mark_notified("identity")
+            candidates = inbox.cleanup_candidates({"/SMS/1"})
+            self.assertEqual(len(candidates), 1)
+            self.assertEqual(candidates[0]["identity"], "identity")
 
     def test_modem_signal_header_extracts_interface_and_member(self):
         line = "object /org/freedesktop/ModemManager1/Modem/0: signal interface=org.freedesktop.DBus.Properties; member=PropertiesChanged"
