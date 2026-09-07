@@ -10,6 +10,7 @@ This roadmap prioritizes long-running reliability and bounded SMS notification l
 - A 5-second SMS/call reconciliation pass is the reliable notification path.
 - Known SMS paths are indexed so reconciliation does not re-read old SMS bodies.
 - Complete received SMS payloads are now archived locally in SQLite; modem cleanup remains disabled and dry-run only.
+- A manual root-only cleanup script now exists for explicitly filtered tests; the notifier never invokes deletion automatically.
 - Recent measured SMS notification latency: about 4-7 seconds.
 - Full scan cost at 36 stored SMS: about 7.35 seconds; incremental reconciliation: about 0.17-0.19 seconds.
 

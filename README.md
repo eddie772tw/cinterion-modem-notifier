@@ -25,6 +25,7 @@ python3 scripts/query_modem.py health
 python3 scripts/query_modem.py metrics --limit 50
 python3 scripts/query_modem.py inbox --limit 50 --redact-sms
 python3 scripts/query_modem.py sms-cleanup --limit 50 --redact-sms
+scripts/cleanup_sms.sh --sender 0900392453 --text-prefix 測試訊息 --show-text
 python3 scripts/benchmark_sms.py --samples 5
 ```
 
@@ -36,6 +37,22 @@ are copied into the mode-600 SQLite database before notification bookkeeping,
 but modem SMS are never deleted. `sms-cleanup` is a dry-run report only and
 always returns `delete_performed: false` until a separately authorized cleanup
 policy is implemented.
+
+Manual deletion is intentionally a separate, root-only script. It verifies the
+current modem SMS identity against the archived SQLite identity immediately
+before each delete and verifies that the object path disappears afterward. The
+default is a dry-run; deletion requires both `--apply` and `--confirm`, plus a
+narrow `--sender` and/or `--text-prefix` filter:
+
+```bash
+sudo scripts/cleanup_sms.sh \
+  --apply --confirm \
+  --sender 0900392453 \
+  --text-prefix 測試訊息 \
+  --show-text
+```
+
+The notifier service never invokes this script automatically.
 
 Observed events are also upserted into a private SQLite history under
 `$XDG_STATE_HOME/cinterion-modem-notifier/events.db` (normally
