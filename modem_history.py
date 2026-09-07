@@ -40,7 +40,61 @@ class EventHistory:
                 """
             )
             connection.execute("CREATE INDEX IF NOT EXISTS events_last_seen ON events(last_seen DESC)")
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS metrics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    observed_at REAL NOT NULL,
+                    name TEXT NOT NULL,
+                    value REAL NOT NULL,
+                    unit TEXT NOT NULL,
+                    dimensions TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute("CREATE INDEX IF NOT EXISTS metrics_name_time ON metrics(name, observed_at DESC)")
         self.path.chmod(0o600)
+
+    def record_metric(
+        self,
+        name: str,
+        value: float,
+        unit: str = "",
+        dimensions: dict[str, Any] | None = None,
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO metrics (observed_at, name, value, unit, dimensions) VALUES (?, ?, ?, ?, ?)",
+                (time.time(), name, float(value), unit, json.dumps(dimensions or {}, sort_keys=True)),
+            )
+
+    def recent_metrics(self, limit: int = 100, name: str | None = None) -> list[dict[str, Any]]:
+        limit = max(1, min(int(limit), 500))
+        query = "SELECT observed_at, name, value, unit, dimensions FROM metrics"
+        parameters: list[Any] = []
+        if name:
+            query += " WHERE name = ?"
+            parameters.append(name)
+        query += " ORDER BY observed_at DESC LIMIT ?"
+        parameters.append(limit)
+        with self._connect() as connection:
+            rows = connection.execute(query, parameters).fetchall()
+        result = []
+        for observed_at, metric_name, value, unit, dimensions in rows:
+            try:
+                parsed_dimensions = json.loads(dimensions)
+            except json.JSONDecodeError:
+                parsed_dimensions = {"error": "corrupt metric dimensions"}
+            result.append(
+                {
+                    "observed_at": observed_at,
+                    "name": metric_name,
+                    "value": value,
+                    "unit": unit,
+                    "dimensions": parsed_dimensions,
+                }
+            )
+        return result
 
     def observe(self, event: Any) -> None:
         fingerprint = event.fingerprint()

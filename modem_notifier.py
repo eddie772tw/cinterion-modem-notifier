@@ -20,6 +20,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -80,6 +81,13 @@ def signal_quality_band(value: str) -> str:
         if quality < threshold:
             return f"<{threshold}"
     return ">=90"
+
+
+def sms_age_seconds(timestamp: str) -> float | None:
+    try:
+        return max(0.0, time.time() - datetime.fromisoformat(timestamp).timestamp())
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 @dataclass(frozen=True)
@@ -278,7 +286,17 @@ class Monitor:
             store.data["delivery_target"] = discord.target_id
 
     def poll(self) -> None:
-        self._deliver_events(self._status_events() + self._sms_events() + self._call_events())
+        status_events = self._status_events()
+        scan_started = time.monotonic()
+        sms_events = self._sms_events()
+        if self.history is not None:
+            self.history.record_metric(
+                "full_sms_scan_seconds",
+                time.monotonic() - scan_started,
+                "seconds",
+                {"sms_count": len(self.store.data["sms_paths"])},
+            )
+        self._deliver_events(status_events + sms_events + self._call_events())
 
     def poll_status(self) -> None:
         """Process a modem status signal without scanning SMS objects."""
@@ -286,7 +304,16 @@ class Monitor:
 
     def poll_reconciliation(self) -> None:
         """Reconcile object-list events without polling modem status."""
-        self._deliver_events(self._sms_events(only_new_paths=True) + self._call_events())
+        scan_started = time.monotonic()
+        sms_events = self._sms_events(only_new_paths=True)
+        if self.history is not None:
+            self.history.record_metric(
+                "sms_reconciliation_seconds",
+                time.monotonic() - scan_started,
+                "seconds",
+                {"sms_count": len(self.store.data["sms_paths"])},
+            )
+        self._deliver_events(sms_events + self._call_events())
 
     def _deliver_events(self, events: list[Event]) -> None:
         for event in events:
@@ -298,6 +325,10 @@ class Monitor:
                 self.store.record(event)
                 if event.kind.startswith("sms:"):
                     self.store.data["seen_sms"] = (self.store.data["seen_sms"] + [event.kind[4:]])[-500:]
+                    if self.history is not None:
+                        lag = sms_age_seconds(event.fields.get("timestamp", ""))
+                        if lag is not None:
+                            self.history.record_metric("sms_notification_lag_seconds", lag, "seconds")
         self.store.save()
 
     def _status_events(self) -> list[Event]:

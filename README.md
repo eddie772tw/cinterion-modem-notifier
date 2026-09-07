@@ -17,6 +17,18 @@ seconds; `POLL_INTERVAL_SECONDS` remains the slower full-snapshot fallback and
 defaults to 20 seconds. The SMS path index is pruned against the current modem
 object list so it does not grow without bound after old messages are deleted.
 
+The service records private local performance metrics in the same SQLite
+database. Query them through the shared adapter:
+
+```bash
+python3 scripts/query_modem.py health
+python3 scripts/query_modem.py metrics --limit 50
+python3 scripts/benchmark_sms.py --samples 5
+```
+
+The benchmark is read-only. It measures path-list enumeration, incremental
+reconciliation, and (unless `--skip-full` is used) one full SMS scan.
+
 Observed events are also upserted into a private SQLite history under
 `$XDG_STATE_HOME/cinterion-modem-notifier/events.db` (normally
 `~/.local/state/...`). The history is local-only and protected with mode 600;

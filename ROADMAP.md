@@ -31,7 +31,7 @@ This roadmap prioritizes long-running reliability and bounded SMS notification l
 
 ### Work
 
-- Add structured local metrics: `sms_storage_count`, `reconciliation_seconds`, `notification_lag_seconds`, `webhook_failures`, `watcher_restarts`, `full_scan_seconds`.
+- Add structured local metrics: `sms_storage_count`, `reconciliation_seconds`, `notification_lag_seconds`, `webhook_failures`, `watcher_restarts`, `full_scan_seconds`. (Initial scan/reconciliation metrics and read-only health/metrics queries are implemented.)
 - Store transport/observation timestamps separately from modem-provided SMS timestamps.
 - Add bounded retry/backoff for Discord delivery without duplicate notifications.
 - Add a health snapshot query for service, watcher, ModemManager, modem registration, and bearer state.
@@ -54,6 +54,7 @@ This roadmap prioritizes long-running reliability and bounded SMS notification l
 ### Work
 
 - Keep the path index bounded to currently listed objects; retain stable identity hashes for deduplication.
+- Keep a read-only benchmark for path-list, incremental, and full-scan timings. (Implemented as `scripts/benchmark_sms.py`.)
 - Add a periodic full consistency scan at a much lower frequency than reconciliation.
 - Measure path-list latency at representative storage sizes before changing intervals.
 - Add tests for path deletion, path reuse, storage migration, duplicate multipart messages, and malformed SMS objects.

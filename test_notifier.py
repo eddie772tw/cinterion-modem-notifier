@@ -36,6 +36,15 @@ class NotifierTests(unittest.TestCase):
             self.assertEqual(rows[0]["observations"], 2)
             self.assertEqual(rows[0]["fields"]["state"], "registered")
 
+    def test_event_history_records_metrics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            history = EventHistory(Path(directory) / "events.db")
+            history.record_metric("reconciliation_seconds", 0.25, "seconds", {"sms_count": 3})
+            metrics = history.recent_metrics(name="reconciliation_seconds")
+            self.assertEqual(len(metrics), 1)
+            self.assertEqual(metrics[0]["unit"], "seconds")
+            self.assertEqual(metrics[0]["dimensions"]["sms_count"], 3)
+
     def test_modem_signal_header_extracts_interface_and_member(self):
         line = "object /org/freedesktop/ModemManager1/Modem/0: signal interface=org.freedesktop.DBus.Properties; member=PropertiesChanged"
         match = SIGNAL_HEADER.search(line)
