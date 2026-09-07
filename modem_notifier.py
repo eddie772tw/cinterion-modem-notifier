@@ -35,6 +35,9 @@ COLOR_YELLOW = 0xFEE75C
 COLOR_BLUE = 0x3498DB
 COLOR_GRAY = 0x95A5A6
 WEAK_SIGNAL_THRESHOLD = 30
+# Evaluated from the lowest threshold upward; the resulting labels remain
+# user-facing ``<90``, ``<75``, ``<50``, and ``<25``.
+SIGNAL_NOTIFICATION_THRESHOLDS = (25, 50, 75, 90)
 
 
 def setting(name: str, default: str) -> str:
@@ -64,6 +67,18 @@ def as_mapping(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
 
 
+def signal_quality_band(value: str) -> str:
+    """Return the notification band for a signal quality percentage."""
+    try:
+        quality = int(value)
+    except (TypeError, ValueError):
+        return "unknown"
+    for threshold in SIGNAL_NOTIFICATION_THRESHOLDS:
+        if quality < threshold:
+            return f"<{threshold}"
+    return ">=90"
+
+
 @dataclass(frozen=True)
 class Event:
     kind: str
@@ -71,7 +86,15 @@ class Event:
     fields: dict[str, str]
 
     def fingerprint(self) -> str:
-        data = json.dumps([self.kind, self.title, self.fields], sort_keys=True)
+        fingerprint_fields = self.fields
+        if self.kind in {"status", "unavailable"} and "signal quality" in self.fields:
+            # Keep the exact value visible in the embed, but deduplicate status
+            # events by threshold band so normal RSSI fluctuation is quiet.
+            fingerprint_fields = dict(self.fields)
+            fingerprint_fields["signal quality"] = signal_quality_band(
+                self.fields["signal quality"]
+            )
+        data = json.dumps([self.kind, self.title, fingerprint_fields], sort_keys=True)
         # Presentation changes to modem status (for example the health color)
         # should produce one fresh notification without replaying SMS history.
         if self.kind in {"status", "unavailable"}:

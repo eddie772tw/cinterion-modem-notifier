@@ -95,6 +95,19 @@ class NotifierTests(unittest.TestCase):
         })
         self.assertEqual(event.fingerprint(), event.fingerprint())
 
+    def test_signal_quality_fingerprint_uses_notification_thresholds(self):
+        def status(quality):
+            return Event("status", "status", {
+                "state": "registered", "network registration": "home",
+                "packet service": "attached", "signal quality": str(quality), "failure": "--",
+            })
+
+        self.assertEqual(status(89).fingerprint(), status(80).fingerprint())
+        self.assertNotEqual(status(80).fingerprint(), status(74).fingerprint())
+        self.assertEqual(status(74).fingerprint(), status(60).fingerprint())
+        self.assertNotEqual(status(60).fingerprint(), status(49).fingerprint())
+        self.assertNotEqual(status(49).fingerprint(), status(24).fingerprint())
+
     def test_new_webhook_target_resets_legacy_delivery_history(self):
         with tempfile.TemporaryDirectory() as directory:
             store = Store(Path(directory) / "state.json")

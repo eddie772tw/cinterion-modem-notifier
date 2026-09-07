@@ -19,7 +19,10 @@ an IP data connection.
 
 Discord embeds use green for a registered/attached modem, red for a failed or
 disconnected modem, yellow for signal quality below 30%, blue for SMS, and gray
-for calls or other event types.
+for calls or other event types. Status deduplication buckets signal quality at
+`<90`, `<75`, `<50`, and `<25`; fluctuations within one bucket do not trigger
+another status notification, and each bucket is notified at most once per state
+history.
 
 When a webhook URL is first configured, the service sends a fresh current-state
 snapshot even if it was already running while the URL was blank. Received SMS
